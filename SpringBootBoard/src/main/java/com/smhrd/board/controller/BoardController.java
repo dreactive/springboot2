@@ -1,6 +1,5 @@
 package com.smhrd.board.controller;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +16,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
+
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.model.CannedAccessControlList;
+import com.amazonaws.services.s3.model.ObjectMetadata;
+import com.amazonaws.services.s3.model.PutObjectRequest;
+import com.smhrd.board.config.BucketConfig;
 import com.smhrd.board.config.FileUploadConfig;
 import com.smhrd.board.entity.BoardEntity;
 import com.smhrd.board.entity.UserEntity;
@@ -31,65 +36,47 @@ public class BoardController {
    @Autowired
    BoardService boardService;
    
-
+   private final BucketConfig bucketConfig;
+   private final AmazonS3 amazonS3;
    private final FileUploadConfig fileUploadConfig;
 
-   BoardController(FileUploadConfig fileUploadConfig) {
+
+   BoardController(FileUploadConfig fileUploadConfig,
+		   BucketConfig bucketConfig, AmazonS3 amazonS3) {
       this.fileUploadConfig = fileUploadConfig;
+      this.amazonS3=amazonS3;
+      this.bucketConfig=bucketConfig;
    }
 
    // 글쓰기 기능
    @PostMapping("/write")
    public String write(@RequestParam String title, @RequestParam String content, HttpSession session,
          @RequestParam MultipartFile image) {
-      // 필요한거 --> 제목, 작성자, 내용, 이미지(번호,작성일은 생략)
-      // - 작성자 -> session에 담긴 값을 가지고 오는 방법
-      // - 이미지 -> 이미지 파일을 가지고 와서 서버에 저장
-      // --> 이미지 경로를 DB에 저장하기 위해
-      // ㄴ 이미지를 서버에 저장(이미지 저장을 위한 환경설정 코드)
+
 
       String imgPath = "";
       
       if (!image.isEmpty()) {
-         // 이미지의 이름
          String img_name = image.getOriginalFilename();
 
-         // java 안에 고유 번호를 만드는 객체 --> UUID
-         // 이미지의 고유 이름 부여
          String file_name = UUID.randomUUID() + "_" + img_name;
-         // random값_이미지이름
-
-         // C:/upload 폴더에 저장할 예정
-         // --> 업로드 할 경로를 변수로 가지고 오기
-         String uploadDir = fileUploadConfig.getUploadDir();
-
-         // 예시) C:upload/123_1.jpg로 저장됨
-         // 앞부분이 uploadDir, 뒷부분이 file_name
-         String filePath = Paths.get(uploadDir, file_name).toString();         
-         // uploadDir + file_name으로 작성 시 os에 따라 경로 못잡음
-
-         // 파일 경로 확인 후 이미지 저장
+         
          try {
-            image.transferTo(new File(filePath));
-            
-            // 경로를 별도의 변수에 저장
-            imgPath = "/uploads/" + file_name;
-            
-         } catch (IllegalStateException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-         } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+        	ObjectMetadata metadata = new ObjectMetadata();
+ 	        metadata.setContentLength(image.getSize());
+ 	        metadata.setContentType(image.getContentType());
+
+ 	        PutObjectRequest request = new PutObjectRequest(bucketConfig.getbucketName(), file_name, image.getInputStream(), metadata)
+ 	                .withCannedAcl(CannedAccessControlList.PublicRead); // public 접근 허용
+
+ 	        amazonS3.putObject(request);
+ 	        imgPath = amazonS3.getUrl(bucketConfig.getbucketName(), file_name).toString();
+ 			
+         }catch (Exception e){
+        	 e.printStackTrace();
          }
-
-
       }
 
-      // DB 저장
-      // service 객체를 통해
-      // BoardService -> BoardRepository
-      // save()
       BoardEntity entity = new BoardEntity();
       entity.setTitle(title);
       entity.setContent(content);
